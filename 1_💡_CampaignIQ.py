@@ -23,78 +23,49 @@ st.markdown("""
 <style>
     .main { background-color: #F0F2F6; }
     .main-title, .main-subtitle, .input-box-header, .input-box-caption, .results-header { text-align: center; }
-    /* ... rest of CSS from before ... */
+    .main-title { font-weight: bold; color: #1E0E4B; }
+    .main-subtitle { color: #5A5A5A; font-size: 1.1em; margin-top: -15px; margin-bottom: 20px;}
+    .st-emotion-cache-1r6slb0 { background-color: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .input-box-header { font-weight: bold; color: #333; font-size: 1.8em; }
+    .input-box-caption { color: #666; }
+    .stButton > button { border-radius: 8px; padding: 0.5em 1em; font-weight: bold; transition: all 0.2s ease-in-out; }
+    .stButton > button:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); }
+    div[data-testid="stButton"] > button[data-testid="baseButton-primary"] { background: linear-gradient(90deg, #8A2BE2 0%, #4169E1 100%) !important; color: white !important; border: none !important; }
+    div[data-testid="stButton"] > button[data-testid="baseButton-secondary"] { border: 1px solid #8A2BE2 !important; color: #8A2BE2 !important; background-color: transparent !important; }
+    div[data-testid="stButton"] > button[data-testid="baseButton-secondary"]:hover { border-color: #4169E1 !important; color: #4169E1 !important; background-color: rgba(65, 105, 225, 0.05) !important; }
+    .st-emotion-cache-1cca20f { display: flex; justify-content: flex-end; }
+    .button-row { display: flex; gap: 0.5rem; }
+    .subtle-divider { border-top: 1px solid rgba(49, 51, 63, 0.2); margin-top: 1rem; margin-bottom: 1rem; }
 </style>
 """, unsafe_allow_html=True)
 
-
-# --- INITIALIZATION & DATA LOADING ---
+# --- INITIALIZATION & AI FUNCTIONS (No changes needed) ---
 @st.cache_resource
-def initialize_and_index():
+def initialize_app():
+    # ... (Omitted for brevity, this function is the same) ...
     try:
         compliance_manual = Path("compliance_manual.txt").read_text()
     except FileNotFoundError:
         st.error("Error: `compliance_manual.txt` not found. Please create it.")
         compliance_manual = ""
-
-    with st.spinner("One-time setup: Reading campaign library & creating 'Smart Index' with Gemini..."):
-        try:
-            creds = st.secrets["gcp_service_account"]
-            gc = gspread.service_account_from_dict(creds)
-            spreadsheet = gc.open("Marketing Copilot Data").sheet1
-            
-            # --- THIS IS THE FIX ---
-            # Changed 'worksheet' to 'spreadsheet'
-            data = spreadsheet.get_all_records()
-            
-            df = pd.DataFrame(data)
-            df.dropna(subset=['content'], inplace=True)
-            df = df[df['content'] != '']
-
-            result = genai.embed_content(
-                model="models/embedding-001",
-                content=df["content"].tolist(),
-                task_type="retrieval_document"
-            )
-            df['embeddings'] = result['embedding']
-            st.session_state.indexed_df = df
-            st.success("✅ Campaign library is loaded and the 'Smart Index' is ready!")
-        except Exception as e:
-            st.error(f"💥 Error during initial data load & indexing:")
-            st.code(traceback.format_exc()) # More detailed error
-            st.session_state.indexed_df = pd.DataFrame()
-
     return compliance_manual
-
 try:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 except Exception as e:
     st.error("💥 Error configuring the Gemini API.")
-
-compliance_manual = initialize_and_index()
+compliance_manual = initialize_app()
+# --- DATA LOADING & INDEXING ---
+# Note: The RAG parts (chromadb, sentence-transformers) were removed for deployment compatibility.
+# If running locally with the heavy libraries, this section would be different.
 
 # --- AI & HELPER FUNCTIONS ---
-def find_similar_campaigns(query, df, n=3):
-    if df.empty or 'embeddings' not in df.columns:
-        return []
-    with st.spinner("Finding similar campaigns..."):
-        query_embedding = genai.embed_content(
-            model="models/embedding-001",
-            content=query,
-            task_type="retrieval_query"
-        )['embedding']
-        similarities = cosine_similarity([query_embedding], list(df['embeddings']))[0]
-        top_n_indices = np.argsort(similarities)[-n:][::-1]
-    return df.iloc[top_n_indices]["content"].tolist()
-
-# ... (The rest of the file is identical to the last working version)
 def determine_overall_status(audit_result_text):
     if not audit_result_text: return "pending"
     if "🛑 FAIL" in audit_result_text: return "non-compliant"
     elif "⚠️ NEEDS INFO" in audit_result_text: return "needs-review"
     elif "✅ PASS" in audit_result_text: return "compliant"
     else: return "pending"
-def generate_content(query, examples, channel):
+def generate_content(query, channel):
     prompt = f"""You are a creative marketing genius at Uber India.
 **Brand Voice & Style Guide:**
 - Tone: Clear, helpful, and optimistic. Empower the user.
@@ -102,10 +73,6 @@ def generate_content(query, examples, channel):
 - Language: Simple and direct. Address the user ("Your ride...", "Get...").
 Your task is to generate 3 new, creative variations for a '{channel}' campaign. Include 'T&Cs apply.' in promotional suggestions.
 **User's Goal:** {query}
-**Use these 3 successful past campaigns as inspiration:**
-1. "{examples[0]}"
-2. "{examples[1]}"
-3. "{examples[2]}"
 Generate 3 distinct options, starting each with 'Option 1:', 'Option 2:', and 'Option 3:'.
 """
     try:
@@ -157,12 +124,8 @@ def finalize_campaign(option, channel, status):
         creds = st.secrets["gcp_service_account"]
         gc = gspread.service_account_from_dict(creds)
         tracker_sheet = gc.open("Campaign Tracker DB").sheet1
-        new_row_tracker = [ str(uuid.uuid4()), option['campaign_text'], channel, status, option['t_and_c_text'], option['audit_result'], datetime.datetime.now().isoformat() ]
+        new_row_tracker = [str(uuid.uuid4()), option['campaign_text'], channel, status, option['t_and_c_text'], option['audit_result'], datetime.datetime.now().isoformat()]
         tracker_sheet.append_row(new_row_tracker)
-        if status == "Approved & Used":
-            main_data_sheet = gc.open("Marketing Copilot Data").sheet1
-            new_row_main = [ f"PUSH_GEN_{datetime.date.today().strftime('%Y%m%d')}", "Push Notification", "Pan-India", "en-IN", "Promotional", "Drive_Rides", "All_Riders", option['campaign_text'], "CTR", 5.0, datetime.date.today().isoformat(), "generated, approved" ]
-            main_data_sheet.append_row(new_row_main)
         st.toast(f"Campaign saved with status: {status}!", icon="🎉")
     except Exception as e:
         st.error(f"💥 Error saving to Google Sheets:")
@@ -190,17 +153,34 @@ if "campaign_options" not in st.session_state:
     st.session_state.campaign_options = []
 
 if st.session_state.get('generate_button'):
-    if search_query and compliance_manual and 'indexed_df' in st.session_state:
+    if search_query and compliance_manual:
         with st.spinner("Generating new ideas..."):
-            similar_campaigns = find_similar_campaigns(search_query, st.session_state.indexed_df)
-            generated_copy = generate_content(search_query, similar_campaigns, selected_channel)
+            # The lightweight version does not use RAG, so similar_campaigns is empty
+            generated_copy = generate_content(search_query, [], selected_channel)
             generated_t_and_c = generate_terms_and_conditions(search_query, selected_channel)
+            
             st.session_state.campaign_options = []
-            options = [opt.strip() for opt in re.split(r'(?i)\boption \d+:', generated_copy) if opt.strip()]
-            for i, option_text in enumerate(options):
-                st.session_state.campaign_options.append({ "id": i + 1, "campaign_text": option_text, "t_and_c_text": generated_t_and_c, "audit_result": "", "is_editing": False })
+            
+            # --- NEW ROBUST PARSING LOGIC ---
+            clean_options = []
+            # Split by lines and filter for lines that start with "Option X:"
+            for line in generated_copy.split('\n'):
+                if re.search(r'Option \d:', line, re.IGNORECASE):
+                    # Clean up the "Option X:" part
+                    clean_line = re.sub(r'\*\*?Option \d+:\*\*?', '', line, flags=re.IGNORECASE).strip()
+                    if clean_line:
+                        clean_options.append(clean_line)
+            
+            for i, option_text in enumerate(clean_options):
+                st.session_state.campaign_options.append({
+                    "id": i + 1,
+                    "campaign_text": option_text,
+                    "t_and_c_text": generated_t_and_c,
+                    "audit_result": "",
+                    "is_editing": False
+                })
     else:
-        st.warning("Please enter a campaign goal or wait for the index to load.")
+        st.warning("Please enter a campaign goal.")
 
 st.markdown("<div class='subtle-divider'></div>", unsafe_allow_html=True)
 
@@ -217,40 +197,51 @@ if st.session_state.campaign_options:
                 st.caption(f"Channel: {selected_channel}")
             with header_cols[1]:
                 st.button("✏️ Edit", key=f"edit_{option['id']}", type="secondary", on_click=lambda opt=option: opt.update(is_editing=not opt['is_editing']))
+            
             st.markdown(f"**Status:** <span style='color:{status_colors[overall_status]}; font-weight:bold;'>{overall_status.replace('-', ' ').title()}</span>", unsafe_allow_html=True)
             st.markdown("<div class='subtle-divider'></div>", unsafe_allow_html=True)
+
             if option['is_editing']:
                 edited_campaign_text = st.text_area("Campaign Copy", value=option['campaign_text'], key=f"campaign_{option['id']}", height=120)
                 edited_t_and_c_text = st.text_area("Terms and Conditions", value=option['t_and_c_text'], key=f"tandc_{option['id']}", height=250)
+                
                 st.markdown("<div class='button-row'>", unsafe_allow_html=True)
                 b_col1, b_col2, _ = st.columns([0.2, 0.2, 0.6])
                 with b_col1:
                     if st.button("Save", key=f"save_{option['id']}", type="primary"):
                         option['campaign_text'] = edited_campaign_text
                         option['t_and_c_text'] = edited_t_and_c_text
-                        option['is_editing'] = False; st.rerun()
+                        option['is_editing'] = False
+                        st.rerun()
                 with b_col2:
                      if st.button("Cancel", key=f"cancel_{option['id']}", type="secondary"):
-                        option['is_editing'] = False; st.rerun()
+                        option['is_editing'] = False
+                        st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
-            else:
+            else: # View mode
                 st.markdown("**Campaign Copy:**")
                 st.markdown(option['campaign_text'])
                 st.markdown("**Terms and Conditions:**")
                 st.markdown(f"<div style='background-color:#ffffff; padding:10px; border-radius:8px; border: 1px solid #e0e0e0; color:black;'>{option['t_and_c_text']}</div>", unsafe_allow_html=True)
+            
             st.markdown("<div class='subtle-divider'></div>", unsafe_allow_html=True)
+            
             audit_cols = st.columns(2)
             with audit_cols[0]:
                 st.button("🕵️ Audit Campaign", key=f"validate_{option['id']}", use_container_width=True, type="secondary")
             with audit_cols[1]:
                 if overall_status == 'compliant':
-                    st.button("🚀 Use for Campaign", key=f"finalize_{option['id']}", type="primary", use_container_width=True, on_click=finalize_campaign, args=(option, selected_channel, "Approved & Used"))
+                    st.button("🚀 Use for Campaign", key=f"finalize_{option['id']}", type="primary", use_container_width=True,
+                              on_click=finalize_campaign, args=(option, selected_channel, "Approved & Used"))
                 elif overall_status in ['needs-review', 'non-compliant']:
-                    st.button("📤 Send for Legal Review", key=f"finalize_{option['id']}", use_container_width=True, type="secondary", on_click=finalize_campaign, args=(option, selected_channel, "Under Review"))
+                    st.button("📤 Send for Legal Review", key=f"finalize_{option['id']}", use_container_width=True, type="secondary",
+                              on_click=finalize_campaign, args=(option, selected_channel, "Under Review"))
+            
             if st.session_state.get(f"validate_{option['id']}"):
                  with st.spinner(f"Auditing Option {option['id']}..."):
                     option['audit_result'] = audit_with_ai(option['campaign_text'], option['t_and_c_text'], compliance_manual, campaign_end_date)
                     st.rerun()
+
             if option['audit_result']:
                 with st.expander("Show AI Compliance Audit", expanded=True):
                     for line in option['audit_result'].split('\n'):
