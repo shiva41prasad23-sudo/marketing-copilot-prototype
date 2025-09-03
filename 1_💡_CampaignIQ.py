@@ -82,7 +82,6 @@ except Exception as e:
 
 compliance_manual = get_compliance_manual()
 
-# This is the key fix: We ensure every user's session state has the indexed data.
 if 'indexed_df' not in st.session_state:
     st.session_state.indexed_df = get_indexed_dataframe()
 
@@ -99,7 +98,6 @@ def find_similar_campaigns(query, df, n=3):
         similarities = cosine_similarity([query_embedding], list(df['embeddings']))[0]
         top_n_indices = np.argsort(similarities)[-n:][::-1]
     return df.iloc[top_n_indices]["content"].tolist()
-# ... (All other functions like determine_overall_status, generate_content, etc. are the same as before)
 def determine_overall_status(audit_result_text):
     if not audit_result_text: return "pending"
     if "🛑 FAIL" in audit_result_text: return "non-compliant"
@@ -183,6 +181,9 @@ def finalize_campaign(option, channel, status):
 # --- MAIN APP UI & LOGIC ---
 st.markdown("<div class='main-title'><h1>CampaignIQ</h1></div>", unsafe_allow_html=True)
 st.markdown("<p class='main-subtitle'>Smart assistant for campaign creation - Generate AI-powered, compliant marketing campaigns instantly</p>", unsafe_allow_html=True)
+
+if 'indexed_df' in st.session_state and not st.session_state.indexed_df.empty:
+    st.success("✅ Campaign library is loaded and the 'Smart Index' is ready!")
 st.markdown("<div class='subtle-divider'></div>", unsafe_allow_html=True)
 
 _, center_col, _ = st.columns([0.5, 3.0, 0.5]) 
@@ -207,10 +208,26 @@ if st.session_state.get('generate_button'):
             similar_campaigns = find_similar_campaigns(search_query, st.session_state.indexed_df)
             generated_copy = generate_content(search_query, similar_campaigns, selected_channel)
             generated_t_and_c = generate_terms_and_conditions(search_query, selected_channel)
+            
             st.session_state.campaign_options = []
-            options = [opt.strip() for opt in re.split(r'(?i)\boption \d+:', generated_copy) if opt.strip()]
-            for i, option_text in enumerate(options):
-                st.session_state.campaign_options.append({ "id": i + 1, "campaign_text": option_text, "t_and_c_text": generated_t_and_c, "audit_result": "", "is_editing": False })
+            
+            # --- NEW ROBUST PARSING LOGIC ---
+            # This logic finds all occurrences of "Option X:" and extracts the text between them.
+            matches = list(re.finditer(r'(?i)\bOption \d+:', generated_copy))
+            for i in range(len(matches)):
+                start_index = matches[i].end()
+                end_index = matches[i+1].start() if i + 1 < len(matches) else len(generated_copy)
+                
+                option_text = generated_copy[start_index:end_index].strip()
+                
+                if option_text:
+                    st.session_state.campaign_options.append({
+                        "id": i + 1,
+                        "campaign_text": option_text,
+                        "t_and_c_text": generated_t_and_c,
+                        "audit_result": "",
+                        "is_editing": False
+                    })
     else:
         st.warning("Please enter a campaign goal or wait for the index to load.")
 
@@ -232,9 +249,11 @@ if st.session_state.campaign_options:
             
             st.markdown(f"**Status:** <span style='color:{status_colors[overall_status]}; font-weight:bold;'>{overall_status.replace('-', ' ').title()}</span>", unsafe_allow_html=True)
             st.markdown("<div class='subtle-divider'></div>", unsafe_allow_html=True)
+
             if option['is_editing']:
                 edited_campaign_text = st.text_area("Campaign Copy", value=option['campaign_text'], key=f"campaign_{option['id']}", height=120)
                 edited_t_and_c_text = st.text_area("Terms and Conditions", value=option['t_and_c_text'], key=f"tandc_{option['id']}", height=250)
+                
                 st.markdown("<div class='button-row'>", unsafe_allow_html=True)
                 b_col1, b_col2, _ = st.columns([0.2, 0.2, 0.6])
                 with b_col1:
@@ -246,7 +265,7 @@ if st.session_state.campaign_options:
                      if st.button("Cancel", key=f"cancel_{option['id']}", type="secondary"):
                         option['is_editing'] = False; st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
-            else:
+            else: # View mode
                 st.markdown("**Campaign Copy:**")
                 st.markdown(option['campaign_text'])
                 st.markdown("**Terms and Conditions:**")
