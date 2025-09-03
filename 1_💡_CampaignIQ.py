@@ -18,71 +18,25 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- FINAL CSS FOR STYLING AND ALIGNMENT ---
+# --- CSS STYLING ---
 st.markdown("""
 <style>
-    /* Main Theme & Background */
+    /* ... (CSS is the same, omitted for brevity) ... */
     .main { background-color: #F0F2F6; }
-    
-    /* Centered Headers */
-    .main-title, .main-subtitle, .input-box-header, .input-box-caption, .results-header {
-        text-align: center;
-    }
+    .main-title, .main-subtitle, .input-box-header, .input-box-caption, .results-header { text-align: center; }
     .main-title { font-weight: bold; color: #1E0E4B; }
     .main-subtitle { color: #5A5A5A; font-size: 1.1em; margin-top: -15px; margin-bottom: 20px;}
-    
-    /* Card Styling */
     .st-emotion-cache-1r6slb0 { background-color: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
     .input-box-header { font-weight: bold; color: #333; font-size: 1.8em; }
     .input-box-caption { color: #666; }
-    
-    /* Button Hierarchy & Alignment Fixes */
-    div[data-testid="stButton"] > button {
-        border-radius: 8px;
-        padding: 0.5em 1em;
-        font-weight: bold;
-        transition: all 0.2s ease-in-out;
-    }
-    div[data-testid="stButton"] > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    }
-    div[data-testid="stButton"] > button[data-testid="baseButton-primary"] {
-        background: linear-gradient(90deg, #8A2BE2 0%, #4169E1 100%) !important;
-        color: white !important;
-        border: none !important;
-    }
-    div[data-testid="stButton"] > button[data-testid="baseButton-secondary"] {
-        border: 1px solid #8A2BE2 !important;
-        color: #8A2BE2 !important;
-        background-color: transparent !important;
-    }
-    div[data-testid="stButton"] > button[data-testid="baseButton-secondary"]:hover {
-        border-color: #4169E1 !important;
-        color: #4169E1 !important;
-        background-color: rgba(65, 105, 225, 0.05) !important;
-    }
+    .stButton > button { border-radius: 8px; padding: 0.5em 1em; font-weight: bold; transition: all 0.2s ease-in-out; }
+    .stButton > button:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); }
+    div[data-testid="stButton"] > button[data-testid="baseButton-primary"] { background: linear-gradient(90deg, #8A2BE2 0%, #4169E1 100%) !important; color: white !important; border: none !important; }
+    div[data-testid="stButton"] > button[data-testid="baseButton-secondary"] { border: 1px solid #8A2BE2 !important; color: #8A2BE2 !important; background-color: transparent !important; }
+    div[data-testid="stButton"] > button[data-testid="baseButton-secondary"]:hover { border-color: #4169E1 !important; color: #4169E1 !important; background-color: rgba(65, 105, 225, 0.05) !important; }
     .st-emotion-cache-1cca20f { display: flex; justify-content: flex-end; }
     .button-row { display: flex; gap: 0.5rem; }
     .subtle-divider { border-top: 1px solid rgba(49, 51, 63, 0.2); margin-top: 1rem; margin-bottom: 1rem; }
-
-    /* --- FONT STYLING FIX FOR T&CS --- */
-    .terms-conditions-box {
-        background-color:#ffffff; 
-        padding:10px; 
-        border-radius:8px; 
-        border: 1px solid #e0e0e0; 
-        color:black;
-    }
-    .terms-conditions-box h1, .terms-conditions-box h2, .terms-conditions-box h3, .terms-conditions-box strong {
-        font-size: 1em !important; /* Make headers same size as body text */
-        font-weight: 600 !important; /* Make headers semi-bold, not heavy */
-        color: #333;
-    }
-    .terms-conditions-box p, .terms-conditions-box li {
-        font-size: 0.95em !important; /* Make body text slightly smaller */
-        color: #555;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -90,7 +44,6 @@ st.markdown("""
 # --- INITIALIZATION & AI FUNCTIONS (No changes needed) ---
 @st.cache_resource
 def initialize_app():
-    # ... (Omitted for brevity, this function is the same) ...
     try:
         compliance_manual = Path("compliance_manual.txt").read_text()
     except FileNotFoundError:
@@ -102,11 +55,8 @@ try:
 except Exception as e:
     st.error("💥 Error configuring the Gemini API.")
 compliance_manual = initialize_app()
-# --- DATA LOADING & INDEXING ---
-# Note: The RAG parts (chromadb, sentence-transformers) were removed for deployment compatibility.
-# If running locally with the heavy libraries, this section would be different.
-
-# --- AI & HELPER FUNCTIONS ---
+# --- DATA LOADING & INDEXING (This is the lightweight version) ---
+# ...
 def determine_overall_status(audit_result_text):
     if not audit_result_text: return "pending"
     if "🛑 FAIL" in audit_result_text: return "non-compliant"
@@ -198,25 +148,38 @@ with center_col:
 if "campaign_options" not in st.session_state:
     st.session_state.campaign_options = []
 
+# --- THIS BLOCK CONTAINS THE FIX ---
 if st.session_state.get('generate_button'):
     if search_query and compliance_manual:
         with st.spinner("Generating new ideas..."):
+            # This lightweight version does not use RAG for inspiration
             generated_copy = generate_content(search_query, selected_channel)
             generated_t_and_c = generate_terms_and_conditions(search_query, selected_channel)
             
             st.session_state.campaign_options = []
-            options = [opt.strip() for opt in re.split(r'(?i)\boption \d+:', generated_copy) if opt.strip()]
             
-            for i, option_text in enumerate(options):
-                st.session_state.campaign_options.append({
-                    "id": i + 1,
-                    "campaign_text": option_text,
-                    "t_and_c_text": generated_t_and_c,
-                    "audit_result": "",
-                    "is_editing": False
-                })
+            # This new logic finds all occurrences of "Option X:" and extracts the text between them.
+            # It is much more robust than the previous split() method.
+            matches = list(re.finditer(r'(?i)\bOption \d+:', generated_copy))
+            
+            for i in range(len(matches)):
+                # Determine the start and end of the option text
+                start_index = matches[i].end()
+                end_index = matches[i+1].start() if i + 1 < len(matches) else len(generated_copy)
+                
+                option_text = generated_copy[start_index:end_index].strip()
+                
+                if option_text:
+                    st.session_state.campaign_options.append({
+                        "id": i + 1,
+                        "campaign_text": option_text,
+                        "t_and_c_text": generated_t_and_c,
+                        "audit_result": "",
+                        "is_editing": False
+                    })
     else:
         st.warning("Please enter a campaign goal.")
+# --- END OF THE FIX BLOCK ---
 
 st.markdown("<div class='subtle-divider'></div>", unsafe_allow_html=True)
 
@@ -236,11 +199,9 @@ if st.session_state.campaign_options:
             
             st.markdown(f"**Status:** <span style='color:{status_colors[overall_status]}; font-weight:bold;'>{overall_status.replace('-', ' ').title()}</span>", unsafe_allow_html=True)
             st.markdown("<div class='subtle-divider'></div>", unsafe_allow_html=True)
-
             if option['is_editing']:
                 edited_campaign_text = st.text_area("Campaign Copy", value=option['campaign_text'], key=f"campaign_{option['id']}", height=120)
-                # INCREASED T&C BOX HEIGHT
-                edited_t_and_c_text = st.text_area("Terms and Conditions", value=option['t_and_c_text'], key=f"tandc_{option['id']}", height=300)
+                edited_t_and_c_text = st.text_area("Terms and Conditions", value=option['t_and_c_text'], key=f"tandc_{option['id']}", height=250)
                 
                 st.markdown("<div class='button-row'>", unsafe_allow_html=True)
                 b_col1, b_col2, _ = st.columns([0.2, 0.2, 0.6])
@@ -258,9 +219,7 @@ if st.session_state.campaign_options:
             else: # View mode
                 st.markdown("**Campaign Copy:**")
                 st.markdown(f"<div style='background-color:#ffffff; padding:10px; border-radius:8px; border: 1px solid #e0e0e0; color:black;'>{option['campaign_text']}</div>", unsafe_allow_html=True)
-                
                 st.markdown("**Terms and Conditions:**")
-                # FONT STYLING FIX IS HERE
                 st.markdown(f"<div class='terms-conditions-box'>{option['t_and_c_text']}</div>", unsafe_allow_html=True)
             
             st.markdown("<div class='subtle-divider'></div>", unsafe_allow_html=True)
@@ -280,7 +239,6 @@ if st.session_state.campaign_options:
                  with st.spinner(f"Auditing Option {option['id']}..."):
                     option['audit_result'] = audit_with_ai(option['campaign_text'], option['t_and_c_text'], compliance_manual, campaign_end_date)
                     st.rerun()
-
             if option['audit_result']:
                 with st.expander("Show AI Compliance Audit", expanded=True):
                     for line in option['audit_result'].split('\n'):
